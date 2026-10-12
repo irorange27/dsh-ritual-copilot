@@ -214,7 +214,7 @@ export function honorRitual(state, id, date = todayStr()) {
 }
 
 // 失守 = 递归整棵子树回到预备区（守约进度保留）
-export function breachRitual(state, id, date = todayStr()) {
+export function breachRitual(state, id, date = todayStr(), reason = '') {
   const ids = subtreeIds(state, id)
   for (const rid of ids) {
     const r = ritualById(state, rid)
@@ -227,7 +227,11 @@ export function breachRitual(state, id, date = todayStr()) {
   state.leaves = state.leaves.filter(f => f.ritualIds.length > 0)
   const day = state.checkins[date]
   if (day) for (const rid of ids) delete day[rid]
-  logEvent(state, { type: 'breach', ritualId: id, title: ritualById(state, id)?.title ?? '', cascade: ids.length })
+  logEvent(state, {
+    type: 'breach', ritualId: id, title: ritualById(state, id)?.title ?? '', cascade: ids.length,
+    // 归因是可选的，但一旦记下来就能回答"为什么总在这条上栽"（#4）
+    ...(String(reason ?? '').trim() ? { reason: String(reason).trim() } : {}),
+  })
   return ids
 }
 

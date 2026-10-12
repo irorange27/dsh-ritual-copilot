@@ -4,7 +4,7 @@
 import * as R from './src/rsip.js'
 import * as S from './src/session.js'
 import { CATALOG, CATEGORIES, GUIDE, guideById, catalogByTitle } from './src/catalog.js'
-import { summaryStats, streakFor, heatmapDays } from './src/stats.js'
+import { summaryStats, streakFor, heatmapDays, honorRate, ritualHealth, adjustments, breachReasons } from './src/stats.js'
 import { load, save } from './src/store.js'
 import { registerRoutes } from './routes.js'
 import { registerTools } from './tools.js'
@@ -103,13 +103,14 @@ const HELP = [
   '  /ritual start <名字|编号> [自动|挂钩|手动|保险]   立约（每天限一条）',
   '  /ritual add <名字> [类型=…] [说明=…]   收录到预备区（不占今日名额）',
   '  /ritual honor <名字|编号>  守约：完成今日日结（单条）',
-  '  /ritual breach <名字|编号> 失守（连带子仪式回预备区，守约天数保留）',
+  '  /ritual breach <名字|编号> [原因=…]  失守（连带子仪式回预备区，守约天数保留）',
   '  /ritual reserve          查看预备区仪式（带编号）',
   '  /ritual list             查看仪式单（守约中）',
   '  /ritual leave <销假日期> <名字1> [名字2...]   告假',
   '  /ritual edit <名字|编号> [新名字=…] [类型=…] [说明=…] [挂靠=…|顶层]   修改仪式',
   '  /ritual rm <名字|编号>    删除仪式（日结记录一并清理，不可撤销）',
-  '  /ritual stats            统计（天数/立约/失守/累计守约）',
+  '  /ritual stats            统计（守约率/逐条健康度/调整建议）',
+  '  /ritual health           逐条详细复盘（守约率、连击、失守次数）',
   '  /ritual guide [时段|编号]  不知道挑哪条就从这里开始（按"你在哪个时段出问题"）',
   '  /ritual library [分类]   仪式库（sleep/phone/order/work/energy/mood/mech）',
   '（也可以直接跟 Agent 说你想守住什么，让它帮你写成一条仪式）',
@@ -125,7 +126,7 @@ export function apply(ctx) {
   ctx.commands.register({
     name: 'ritual',
     description: '仪式遵守统计：今日日结/立约/预备区/统计/仪式库',
-    input: { hint: '[done|1 2 3|guide|start|add|honor|breach|reserve|list|leave|edit|rm|stats|library|seed|export|import] …' },
+    input: { hint: '[done|1 2 3|guide|start|add|honor|breach|reserve|list|leave|edit|rm|stats|health|library|seed|export|import] …' },
     async handler(invocation) {
       const state = load()
       const persist = () => save(state)
@@ -270,11 +271,16 @@ export function apply(ctx) {
           return { kind: 'success', text: `✓ ${r.title}${tail}` }
         }
         if (sub === 'breach') {
-          const r = findRitual(state, rest.join(' '), { activeOnly: true })
-          if (!r) return { kind: 'error', text: `仪式单里找不到：${rest.join(' ')}（失守只针对守约中的仪式）` }
-          const ids = R.breachRitual(state, r.id, today); persist()
+          // /ritual breach <名字|编号> [原因=…] —— 原因可选，但记下来才能做归因
+          const reasonArg = rest.find(a => /^原因=/.test(a))
+          const nameArgs = rest.filter(a => !/^原因=/.test(a))
+          const reason = reasonArg ? reasonArg.slice(3) : ''
+          const r = findRitual(state, nameArgs.join(' '), { activeOnly: true })
+          if (!r) return { kind: 'error', text: `仪式单里找不到：${nameArgs.join(' ')}（失守只针对守约中的仪式）` }
+          const ids = R.breachRitual(state, r.id, today, reason); persist()
           const extra = ids.length > 1 ? `，连带 ${ids.length - 1} 条子仪式回预备区` : '，回到预备区'
-          return { kind: 'success', text: `✗ ${r.title} 失守${extra}　守约天数保留（${r.keptDays} 天）` }
+          const tail = reason ? `　原因记下了：${reason}` : '　（想留个原因：/ritual breach <名字> 原因=起太晚）'
+          return { kind: 'success', text: `✗ ${r.title} 失守${extra}　守约天数保留（${r.keptDays} 天）${tail}` }
         }
         if (sub === 'reserve') {
           const list = R.reserveRituals(state)
@@ -376,13 +382,58 @@ export function apply(ctx) {
         if (sub === 'stats') {
           const s = summaryStats(state, today)
           const heat = heatmapDays(state, 14, today).map(d => d.rate === null ? '□' : d.rate >= 1 ? '■' : d.rate >= 0.5 ? '▨' : '▧').join('')
+          const rate = honorRate(state)
+          const lines = [
+            `修行 ${s.runningDays} 天 · 守约中 ${s.activeCount} · 预备区 ${s.reserveCount}`,
+            `立约 ${s.vowCount} 次 · 失守 ${s.breachCount} 次（连带 ${s.cascadedNodes} 条）· 累计守约 ${s.totalHonored} 次`,
+            rate.rate === null
+              ? '守约率 —（还没有日结记录）'
+              : `守约率 ${Math.round(rate.rate * 100)}%（${rate.honored} 守 / ${rate.breached} 失）`,
+            `近14天：${heat}`,
+          ]
+
+          // 逐条健康度：只在样本够时给比率
+          const health = ritualHealth(state, { endDate: today })
+          const rated = health.filter(r => r.rate !== null)
+          if (rated.length) {
+            lines.push('', '逐条守约率（从最容易失守的开始）：')
+            for (const r of rated.slice(0, 8)) {
+              const flag = r.rate < 0.5 ? '⚠' : r.rate >= 0.95 ? '★' : ' '
+              lines.push(`  ${flag} ${Math.round(r.rate * 100).toString().padStart(3)}%  ${r.title}（${r.kindLabel}·${r.honored}/${r.due} 天${r.breaches ? `·失守 ${r.breaches} 次` : ''}）`)
+            }
+            if (rated.length > 8) lines.push(`  … 还有 ${rated.length - 8} 条`)
+          }
+
+          // 失守原因
+          const reasons = breachReasons(state)
+          const known = reasons.filter(x => x.reason !== '（未记录原因）')
+          if (known.length) {
+            lines.push('', '失守原因：' + known.map(x => `${x.reason}×${x.count}`).join('　'))
+          }
+
+          // 调整建议：只在证据明显时给
+          const advice = adjustments(state, { endDate: today })
+          if (advice.length) {
+            lines.push('', '值得调整：')
+            for (const a of advice) lines.push(`  · ${a.text}`)
+          }
+
+          return { kind: 'success', text: lines.join('\n') }
+        }
+        if (sub === 'health') {
+          // /ritual health —— 逐条详细，专门用来做复盘
+          const health = ritualHealth(state, { endDate: today })
+          if (!health.length) return { kind: 'success', text: '还没有任何仪式。' }
           return {
             kind: 'success',
-            text: [
-              `修行 ${s.runningDays} 天 · 守约中 ${s.activeCount} · 预备区 ${s.reserveCount}`,
-              `立约 ${s.vowCount} 次 · 失守 ${s.breachCount} 次（连带 ${s.cascadedNodes} 条）· 累计守约 ${s.totalHonored} 次`,
-              `近14天：${heat}`,
-            ].join('\n'),
+            text: health.map(r => {
+              const pct = r.rate === null ? '样本不足' : `${Math.round(r.rate * 100)}%（${r.honored}/${r.due} 天）`
+              return [
+                `${r.status === 'active' ? '●' : '○'} ${r.title}　[${r.kindLabel}]`,
+                `   守约率 ${pct}　当前连击 ${r.streak} 天　累计守约 ${r.keptDays} 天`,
+                r.breaches ? `   失守 ${r.breaches} 次${r.lastBreach ? `，最近 ${r.lastBreach}` : ''}` : null,
+              ].filter(Boolean).join('\n')
+            }).join('\n'),
           }
         }
         if (sub === 'guide') {

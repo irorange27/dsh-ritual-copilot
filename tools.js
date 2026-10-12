@@ -174,6 +174,7 @@ export function toolDefinitions() {
       parameters: {
         title: { type: 'string', required: true, description: '仪式名（可以是名字的一部分）。' },
         result: { type: 'string', enum: ['守约', '失守'], required: true, description: '用户的日结结果。' },
+        reason: { type: 'string', description: '失守时可选的原因（用户自己说的，例如"起太晚""出差"）。不要替用户编。' },
       },
       output: {
         schema: {
@@ -196,8 +197,9 @@ export function toolDefinitions() {
         if (!hit) return { ok: false, message: `仪式单里找不到「${wanted}」。先用 ritual_overview 看现在有哪些。` }
         try {
           if (args.result === '失守') {
-            const out = S.breachById(hit.id)
-            return { ok: true, message: `「${out.title}」记为失守，退回预备区${out.cascaded ? `（连带 ${out.cascaded} 条子仪式）` : ''}。守约天数保留（${out.keptDays} 天）。` }
+            const out = S.breachById(hit.id, String(args.reason ?? ''))
+            const why = out.reason ? `原因记为「${out.reason}」。` : ''
+            return { ok: true, message: `「${out.title}」记为失守，退回预备区${out.cascaded ? `（连带 ${out.cascaded} 条子仪式）` : ''}。${why}守约天数保留（${out.keptDays} 天）。` }
           }
           const rows = S.honorRituals([hit.id])
           const row = rows[0]

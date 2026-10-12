@@ -149,14 +149,14 @@ export function honorAllPending() {
   })
 }
 
-/** 失守（连带子树回预备区）。 */
-export function breachById(id) {
+/** 失守（连带子树回预备区）。reason 可选，但记下来才能做归因分析。 */
+export function breachById(id, reason = '') {
   return transact((state, today) => {
     const r = R.ritualById(state, id)
     if (!r) throw new Error('仪式不存在')
     if (r.status !== R.STATUS_ACTIVE) throw new Error(`「${r.title}」不在仪式单上`)
-    const ids = R.breachRitual(state, r.id, today)
-    return { title: r.title, keptDays: r.keptDays, cascaded: ids.length - 1 }
+    const ids = R.breachRitual(state, r.id, today, reason)
+    return { title: r.title, keptDays: r.keptDays, cascaded: ids.length - 1, reason: String(reason ?? '').trim() || null }
   })
 }
 

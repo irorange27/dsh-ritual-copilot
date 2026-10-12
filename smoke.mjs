@@ -301,6 +301,82 @@ expect(afterBreach.status === 'reserve' && afterBreach.keptDays === 1, '失守�
 
 console.log('✓ Agent 工具：overview / search / add / settle 全部走通（含重名、空名、未立约、失守保留天数）')
 
+
+// ===== 数据检验（#4）：失守归因 + 逐条健康度 + 调整建议 =====
+const statsMod = await import('./src/stats.js')
+
+// breach 带原因：命令与工具两条路都要能记下来
+const reasonFile = join(tmp, 'ritual-copilot.json')
+const reasonState = JSON.parse(readFileSync(reasonFile, 'utf8'))
+reasonState.vowedOn = {}
+writeFileSync(reasonFile, JSON.stringify(reasonState, null, 2) + '\n')
+const reasonRitualId = reasonState.rituals.find(r => r.title === '工具加的仪式').id
+const sessionMod = await import('./src/session.js')
+sessionMod.activateById(reasonRitualId)
+
+value = await toolOf('ritual_settle').execute({ title: '工具加的仪式', result: '失守', reason: '起太晚' }, {})
+expect(value.ok === true && value.message.includes('原因记为「起太晚」'), 'settle 记下失守原因')
+const storedReason = JSON.parse(readFileSync(reasonFile, 'utf8')).events.filter(e => e.type === 'breach').at(-1).reason
+expect(storedReason === '起太晚', '原因落盘')
+
+// 命令层：/ritual breach <名字> 原因=…
+// 先腾出当天的立约名额（等价于"换一天"）
+const reopen = JSON.parse(readFileSync(reasonFile, 'utf8'))
+reopen.vowedOn = {}
+writeFileSync(reasonFile, JSON.stringify(reopen, null, 2) + '\n')
+sessionMod.activateById(reasonRitualId)
+r = await run('breach 工具加的仪式 原因=出差')
+expect(r.kind === 'success' && r.text.includes('原因记下了：出差'), '命令层记失守原因')
+expect(r.text.includes('守约天数保留'), '命令层失守同样保留天数')
+
+// 手工造样本，验证守约率/健康度/建议
+const sample = {
+  version: 2, createdAt: '2026-09-01',
+  rituals: [
+    { id: 'h1', title: '晨跑半小时', note: '', kind: 'active', parentId: null, status: 'active', vowedDate: '2026-09-01', keptDays: 4, strengthen: 0 },
+    { id: 'h2', title: '晚上屏幕自动变黑白', note: '', kind: 'passive', parentId: null, status: 'active', vowedDate: '2026-09-01', keptDays: 28, strengthen: 0 },
+  ],
+  checkins: {}, vowedOn: {}, leaves: [],
+  events: [
+    { type: 'breach', ritualId: 'h1', date: '2026-09-10', title: '晨跑半小时' },
+    { type: 'breach', ritualId: 'h1', date: '2026-09-18', title: '晨跑半小时' },
+    { type: 'breach', ritualId: 'h1', date: '2026-09-25', title: '晨跑半小时', reason: '起太晚' },
+  ],
+}
+for (let i = 0; i < 28; i++) {
+  const d = new Date('2026-09-01T00:00:00'); d.setDate(d.getDate() + i)
+  ;(sample.checkins[d.toISOString().slice(0, 10)] ||= {})['h2'] = 'honored'
+}
+for (const k of ['2026-09-02', '2026-09-03', '2026-09-04', '2026-09-05']) (sample.checkins[k] ||= {})['h1'] = 'honored'
+
+const health = statsMod.ritualHealth(sample, { endDate: '2026-10-01' })
+expect(health.length === 2, '健康度覆盖每条仪式')
+const worst = health.find(x => x.id === 'h1')
+const best = health.find(x => x.id === 'h2')
+expect(worst.rate !== null && worst.rate < 0.25, '守不住的那条算得出低守约率')
+expect(best.rate !== null && best.rate > 0.85, '稳住的那条算得出高守约率')
+expect(health[0].id === 'h1', '健康度按守约率升序（最容易失守的在前）')
+
+// 样本不足时不给比率——两天的数据不能下结论
+const tiny = { ...sample, rituals: [{ ...sample.rituals[0], vowedDate: '2026-09-30' }], checkins: {}, events: [] }
+expect(statsMod.ritualHealth(tiny, { endDate: '2026-10-01' })[0].rate === null, '样本不足不给比率')
+
+const advice = statsMod.adjustments(sample, { endDate: '2026-10-01' })
+expect(advice.some(a => a.kind === 'downgrade' && a.ritual === '晨跑半小时'), '手动型守不住 → 建议降级')
+expect(!advice.some(a => a.ritual === '晚上屏幕自动变黑白'), '稳住的那条不给"该改"的建议')
+
+const overall = statsMod.honorRate(sample)
+expect(overall.rate !== null && overall.settled === overall.honored + overall.breached, '总守约率分母=有结论的天数')
+const reasons = statsMod.breachReasons(sample)
+expect(reasons.some(x => x.reason === '起太晚' && x.count === 1), '失守原因分布')
+
+// 命令层输出：health 与 stats 都要能跑
+console.log(`\n$ /ritual stats\n${(await run('stats')).text.slice(0, 200)}`)
+console.log(`\n$ /ritual health\n${(await run('health')).text.slice(0, 160)}`)
+expect((await run('stats')).kind === 'success', 'stats 扩展后仍可用')
+expect((await run('health')).kind === 'success', 'health 子命令可用')
+console.log('✓ 数据检验：失守原因可记录、健康度按样本给比率、调整建议只在证据明显时给')
+
 console.log('\nSMOKE OK — store:', join(tmp, 'ritual-copilot.json'))
 
 // ===== 面板（Roadmap #1）：路由 + client 半 =====

@@ -94,7 +94,7 @@ export function registerRoutes(ctx, S) {
 
   register({
     path: ROUTES.breach,
-    fetch: guard(input => S.breachById(requireId(input.id))),
+    fetch: guard(input => S.breachById(requireId(input.id), String(input.reason ?? ''))),
   })
 
   register({
