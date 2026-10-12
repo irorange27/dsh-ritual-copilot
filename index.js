@@ -112,6 +112,7 @@ const HELP = [
   '  /ritual rm <名字|编号>    删除仪式（日结记录一并清理，不可撤销）',
   '  /ritual stats            统计（天数/立约/失守/累计守约）',
   '  /ritual library [分类]   仪式库（sleep/phone/order/work/energy/mood/mech）',
+  '（也可以直接跟 Agent 说你想守住什么，让它帮你写成一条仪式）',
   '  /ritual seed             载入 9 个示例仪式到预备区',
   '  /ritual export [路径]    导出 JSON（默认 ~/.dsh/ritual-copilot-YYYY-MM-DD.json）',
   '  /ritual import <路径> [--merge]   导入 JSON（默认替换；--merge 按标题合并）',
@@ -149,17 +150,22 @@ export function apply(ctx) {
         const st__ = state
 
         if (!sub) {
-          // 空状态引导
+          // 空状态：不问"你要学会用我的命令"，而是"你描述问题，我负责翻译"
           if (!state.rituals.length) {
             return {
               kind: 'success',
               text: [
                 `仪式 · ${today}（还没有仪式）`,
-                '三步开始：',
-                '  1. /ritual seed            载入 9 个示例仪式到预备区',
-                '  2. /ritual reserve         看编号挑一个',
-                '  3. /ritual start <编号>    立约（每天限一条）',
-                '或：/ritual library sleep   从仪式库挑',
+                '',
+                '先说说：你最近最想改掉的一个习惯，或者最想守住的一件事是什么？',
+                '直接在对话里告诉 Agent 就行——它会帮你写成一条仪式。',
+                '',
+                '想自己动手的话：',
+                '  /ritual library          从仪式库挑（29 条）',
+                '  /ritual library sleep    只看作息类',
+                '  /ritual add <名字> 类型=自动|挂钩|手动|保险  自己起一条',
+                '',
+                '提示：第一条挑「自动」型最容易守住（环境设好就不用管，比如晚上屏幕自动变黑白）。',
               ].join('\n'),
             }
           }
@@ -271,7 +277,17 @@ export function apply(ctx) {
         }
         if (sub === 'reserve') {
           const list = R.reserveRituals(state)
-          if (!list.length) return { kind: 'success', text: '预备区是空的。/ritual library 挑一条，或 /ritual start <新名字> 直接立约。' }
+          if (!list.length) {
+            return {
+              kind: 'success',
+              text: [
+                '预备区是空的。',
+                '  /ritual library 挑一条（或 /ritual library sleep 只看作息类）',
+                '  /ritual add <名字> 类型=自动|挂钩|手动|保险  自己起一条',
+                '也可以直接跟 Agent 说你想守住什么，让它帮你写。',
+              ].join('\n'),
+            }
+          }
           return { kind: 'success', text: '预备区（/ritual start <编号> 立约）：\n' + list.map((r, i) => `  ${i + 1}. ${fmtRitual(r, state, today)}`).join('\n') }
         }
         if (sub === 'list') {
@@ -372,9 +388,13 @@ export function apply(ctx) {
           const cat = rest[0]
           const list = cat ? CATALOG.filter(c => c.cat === cat) : CATALOG
           if (!list.length) return { kind: 'success', text: '分类：' + CATEGORIES.map(c => `${c.id}(${c.label})`).join('、') }
+          const empty = !state.rituals.length
+          const head = empty
+            ? '仪式库：挑一条，它会直接进预备区（每天只能立约一条，所以先多挑几条囤着也没关系）。\n'
+            : ''
           return {
             kind: 'success',
-            text: list.map(c => `【${c.title}·${R.KINDS[c.kind]?.label}】${c.rule}\n  ${c.why}\n  → /ritual start "${c.title}"`).join('\n\n'),
+            text: head + list.map(c => `【${c.title}·${R.KINDS[c.kind]?.label}】${c.rule}\n  ${c.why}\n  → /ritual add "${c.title}" 类型=${R.KINDS[c.kind]?.label}`).join('\n\n'),
           }
         }
         if (sub === 'seed') {
