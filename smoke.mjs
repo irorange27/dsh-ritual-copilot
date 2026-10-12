@@ -1,5 +1,5 @@
 // ritual-copilot 本地冒烟：不启动 dsh，直接调命令 handler
-import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 
@@ -182,6 +182,43 @@ r = await run('reserve')
 expect(r.text.includes('睡前拉伸10分钟') && r.text.includes('钩在刷牙后'), 'add 说明可见')
 r = await run('add 睡前拉伸10分钟')
 expect(r.kind === 'error', 'add 重名应失败')
+
+// ===== 旧数据自动迁移（真实 v1 文件 → v2）=====
+// 用独立的 DSH_HOME，避免污染上面的用例
+const legacyHome = mkdtempSync(join(tmpdir(), 'ritual-legacy-'))
+writeFileSync(join(legacyHome, 'ego-rsip.json'), JSON.stringify({
+  version: 1,
+  createdAt: '2026-08-01',
+  policies: [
+    { id: 'p1', title: '起床半小时不碰娱乐App', note: '起床后 30 分钟内严禁娱乐 App', kind: 'semi', parentId: null, status: 'lit', litDate: '2026-08-01', totalHeldDays: 12, strengthen: 1 },
+    { id: 'p2', title: '饭后立刻洗碗', note: '饭后立即洗碗', kind: 'semi', parentId: 'p1', status: 'lit', litDate: '2026-08-02', totalHeldDays: 5, strengthen: 0 },
+    { id: 'p3', title: '半夜不刷短视频', note: '', kind: 'passive', parentId: null, status: 'extinguished', litDate: '2026-08-03', totalHeldDays: 3, strengthen: 0 },
+  ],
+  settlements: { '2026-08-01': { p1: 'kept', p2: 'kept' }, '2026-08-02': { p1: 'kept' } },
+  addedOn: { '2026-08-01': 'p1', '2026-08-02': 'p2' },
+  freezes: [{ id: 'f1', policyIds: ['p2'], startDate: '2026-08-05', endDate: '2026-08-10', resolvedIds: [] }],
+  events: [{ date: '2026-08-01', type: 'add', policyId: 'p1', title: '起床半小时不碰娱乐App' }],
+}, null, 2))
+
+const previousHome = process.env.DSH_HOME
+process.env.DSH_HOME = legacyHome
+// store.js 在模块加载时读 DSH_HOME，所以用查询串绕开 ESM 缓存再导一次
+const legacyStore = await import(`./src/store.js?legacy=${Date.now()}`)
+const migrated = legacyStore.load()
+expect(migrated.version === 2, `迁移后 version 应为 2，实际 ${migrated.version}`)
+expect(migrated.rituals.length === 3, '迁移保留全部仪式')
+const lit = migrated.rituals.find(r => r.id === 'p1')
+expect(lit.status === 'active' && lit.keptDays === 12 && lit.vowedDate === '2026-08-01', 'lit/extinguished → active/reserve，天数保留')
+expect(lit.strengthen === 1, '强化等级保留')
+expect(migrated.rituals.find(r => r.id === 'p3').status === 'reserve', 'extinguished → reserve')
+expect(migrated.rituals.find(r => r.id === 'p2').parentId === 'p1', '树形挂靠保留')
+expect(migrated.checkins['2026-08-01'].p1 === 'honored', 'settlements.kept → checkins.honored')
+expect(migrated.vowedOn['2026-08-01'] === 'p1', 'addedOn 保留')
+expect(migrated.leaves[0].ritualIds[0] === 'p2' && migrated.leaves[0].endDate === '2026-08-10', 'freezes.policyIds → leaves.ritualIds')
+expect(migrated.events[0].type === 'vow', "事件 add → vow")
+expect(existsSync(join(legacyHome, 'ritual-copilot.json')), '迁移后自动写新文件')
+console.log('✓ 旧数据迁移：v1 文件 → v2（含子树/告假/日结/天数/事件名）')
+process.env.DSH_HOME = previousHome
 
 console.log('\nSMOKE OK — store:', join(tmp, 'ritual-copilot.json'))
 
