@@ -1,0 +1,4 @@
+# @local/dsh-ritual-copilot bundle: one row mounting the /ritual command.
+- insert:
+    - id: dsh-ritual-copilot
+      name: '@local/dsh-ritual-copilot'
