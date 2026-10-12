@@ -106,7 +106,22 @@ smoke.mjs             端到端冒烟（不启动 dsh）
 
 ## Roadmap
 
-见 [Issues](https://github.com/irorange27/dsh-ritual-copilot/issues)。
+**[→ Roadmap 总览（Issue #6）](https://github.com/irorange27/dsh-ritual-copilot/issues/6)** — 顺序、依赖关系、设计原则、明确不做的事。
+
+| # | 主题 | 依赖 |
+|---|---|---|
+| [#1](https://github.com/irorange27/dsh-ritual-copilot/issues/1) | **极简面板**（纯 JS，无需构建链）— P0 地基 | — |
+| [#2](https://github.com/irorange27/dsh-ritual-copilot/issues/2) | 主动提醒（一天最多一次） | #1 |
+| [#3](https://github.com/irorange27/dsh-ritual-copilot/issues/3) | 从「我的问题」出发推荐仪式 | — |
+| [#4](https://github.com/irorange27/dsh-ritual-copilot/issues/4) | 用真实数据检验规则本身 | #1 + 1 个月数据 |
+| [#5](https://github.com/irorange27/dsh-ritual-copilot/issues/5) | 冷启动体验（3 分钟拥有第一条仪式） | #5-B 依赖 #3 |
+
+### 为什么命令层不是终点
+
+人的日常操作（每天两次日结）必须「打开就看见、点一下就落盘」；
+命令层留给 Agent 和脚本（批量录入、修改、迁移、查询）。
+
+**一个帮人养习惯的工具，自身使用成本不该高于习惯本身。**
 
 ## License
 
