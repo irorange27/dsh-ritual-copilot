@@ -3,7 +3,7 @@
 
 import * as R from './src/rsip.js'
 import * as S from './src/session.js'
-import { CATALOG, CATEGORIES } from './src/catalog.js'
+import { CATALOG, CATEGORIES, GUIDE, guideById, catalogByTitle } from './src/catalog.js'
 import { summaryStats, streakFor, heatmapDays } from './src/stats.js'
 import { load, save } from './src/store.js'
 import { registerRoutes } from './routes.js'
@@ -111,6 +111,7 @@ const HELP = [
   '  /ritual edit <名字|编号> [新名字=…] [类型=…] [说明=…] [挂靠=…|顶层]   修改仪式',
   '  /ritual rm <名字|编号>    删除仪式（日结记录一并清理，不可撤销）',
   '  /ritual stats            统计（天数/立约/失守/累计守约）',
+  '  /ritual guide [时段|编号]  不知道挑哪条就从这里开始（按"你在哪个时段出问题"）',
   '  /ritual library [分类]   仪式库（sleep/phone/order/work/energy/mood/mech）',
   '（也可以直接跟 Agent 说你想守住什么，让它帮你写成一条仪式）',
   '  /ritual seed             载入 9 个示例仪式到预备区',
@@ -125,7 +126,7 @@ export function apply(ctx) {
   ctx.commands.register({
     name: 'ritual',
     description: '仪式遵守统计：今日日结/立约/预备区/统计/仪式库',
-    input: { hint: '[done|1 2 3|start|add|honor|breach|reserve|list|leave|edit|rm|stats|library|seed|export|import] …' },
+    input: { hint: '[done|1 2 3|guide|start|add|honor|breach|reserve|list|leave|edit|rm|stats|library|seed|export|import] …' },
     async handler(invocation) {
       const state = load()
       const persist = () => save(state)
@@ -161,6 +162,7 @@ export function apply(ctx) {
                 '直接在对话里告诉 Agent 就行——它会帮你写成一条仪式。',
                 '',
                 '想自己动手的话：',
+                '  /ritual guide            从"你在哪个时段出问题"开始',
                 '  /ritual library          从仪式库挑（29 条）',
                 '  /ritual library sleep    只看作息类',
                 '  /ritual add <名字> 类型=自动|挂钩|手动|保险  自己起一条',
@@ -383,6 +385,39 @@ export function apply(ctx) {
               `近14天：${heat}`,
             ].join('\n'),
           }
+        }
+        if (sub === 'guide') {
+          // /ritual guide —— 从「你在哪个时段出问题」入手，而不是让你翻 29 条
+          const which = rest[0]
+          if (!which) {
+            return {
+              kind: 'success',
+              text: [
+                '你在哪个时段最容易出问题？',
+                '',
+                ...GUIDE.map((g, i) => `  ${i + 1}. ${g.when}`),
+                '',
+                '用编号或名字看具体推荐：/ritual guide 1',
+                '想看完整清单：/ritual library',
+              ].join('\n'),
+            }
+          }
+          let entry = /^\d+$/.test(which) ? GUIDE[Number(which) - 1] : guideById(which)
+          if (!entry) entry = GUIDE.find(g => g.when.includes(which) || g.id === which)
+          if (!entry) return { kind: 'error', text: `没有这个时段：${which}\n先打 /ritual guide 看列表` }
+          const lines = [`${entry.when}`, '']
+          entry.picks.forEach(([title, why]) => {
+            const c = catalogByTitle(title)
+            const label = R.KINDS[c?.kind]?.label ?? '自动'
+            const easy = c && c.kind !== 'active'
+            lines.push(`【${title}·${label}${easy ? '·好守' : ''}】`)
+            lines.push(`   ${c?.rule ?? ''}`)
+            lines.push(`   为什么：${why}`)
+            lines.push(`   → /ritual add "${title}" 类型=${label}`)
+            lines.push('')
+          })
+          lines.push('带「好守」的更容易守住——先把一条立稳，别一次加三条。')
+          return { kind: 'success', text: lines.join('\n') }
         }
         if (sub === 'library') {
           const cat = rest[0]
