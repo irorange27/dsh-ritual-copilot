@@ -9,8 +9,11 @@ process.env.DSH_HOME = tmp
 const { apply } = await import('./index.js')
 const regs = []
 const mountedRoutes = []
+const mountedTools = []
 apply({
   commands: { register: (d) => regs.push(d) },
+  // Agent 工具（ctx.tools）也一并挂载并验证
+  tools: { register: (d) => { mountedTools.push(d); return () => {} } },
   // 面板路由（/api/ritual.*）也一并挂载并验证
   connection: { fetch: { register: (route) => route } },
   effect: (fn) => { const made = fn(); if (typeof made !== 'function') mountedRoutes.push(made) },
@@ -237,6 +240,67 @@ expect(existsSync(join(legacyHome, 'ritual-copilot.json')), '迁移后自动写�
 console.log('✓ 旧数据迁移：v1 文件 → v2（含子树/告假/日结/天数/事件名）')
 process.env.DSH_HOME = previousHome
 
+
+// ===== Agent 工具（#3）：模型自己读写仪式 =====
+
+expect(mountedTools.length === 4, `应挂 4 个工具，实际 ${mountedTools.length}`)
+const toolOf = name => mountedTools.find(t => t.name === name)
+expect(toolOf('ritual_overview') !== undefined && toolOf('ritual_search') !== undefined
+  && toolOf('ritual_add') !== undefined && toolOf('ritual_settle') !== undefined, '四个工具都在')
+
+for (const tool of mountedTools) {
+  expect(typeof tool.execute === 'function', `${tool.name} 有 execute`)
+  expect(typeof tool.description === 'string' && tool.description.length > 20, `${tool.name} 有可读描述`)
+  // 输出 schema 必填字段与 render 都对得上
+  for (const [key, spec] of Object.entries(tool.output?.schema?.properties ?? {})) {
+    expect(typeof spec.type === 'string', `${tool.name}.${key} 有类型`)
+  }
+}
+
+// overview：结构完整，且把 GUIDE 一并交给模型（回答"我该养成什么"用）
+let value = await toolOf('ritual_overview').execute({}, {})
+expect(typeof value.date === 'string' && Array.isArray(value.guide) && value.guide.length === 8, 'overview 带 8 个时段入口')
+expect(typeof value.summary.pending === 'number', 'overview 带统计')
+
+// search：关键词命中，空结果时给可行动的话
+value = await toolOf('ritual_search').execute({ query: '困' }, {})
+const searchText = toolOf('ritual_search').output.render({}, value)[0].text
+expect(value.entries.length > 0, '在 29 条仪式库里命中')
+expect(searchText.includes('为什么：'), '搜索结果带原理说明')
+value = await toolOf('ritual_search').execute({ query: '不存在的关键词xyz' }, {})
+expect(toolOf('ritual_search').output.render({}, value)[0].text.includes('ritual_add'), '空结果给出路')
+
+// add → 进预备区；重名给可读错误
+value = await toolOf('ritual_add').execute({ title: '工具加的仪式', kind: '自动', note: '说明' }, {})
+expect(value.ok === true, 'add 成功')
+value = await toolOf('ritual_add').execute({ title: '工具加的仪式', kind: '自动' }, {})
+expect(value.ok === false && value.message.includes('已在单中'), 'add 重名被拒')
+value = await toolOf('ritual_add').execute({ title: '   ', kind: '自动' }, {})
+expect(value.ok === false, 'add 空名字被拒')
+
+// settle 只针对守约中的仪式（没立约时应拒绝，而不是误记）
+value = await toolOf('ritual_settle').execute({ title: '工具加的仪式', result: '守约' }, {})
+expect(value.ok === false && value.message.includes('找不到'), 'settle 拒绝未立约的仪式')
+
+
+// ===== Agent 工具 · settle 的完整路径（放在最后，避免占用前面的立约名额）=====
+const settleFile = join(tmp, 'ritual-copilot.json')
+const settleState = JSON.parse(readFileSync(settleFile, 'utf8'))
+settleState.vowedOn = {}          // 等价于"换一天"，让立约名额空出来
+writeFileSync(settleFile, JSON.stringify(settleState, null, 2) + '\n')
+const toolRitualId = settleState.rituals.find(r => r.title === '工具加的仪式').id
+const settleSession = await import('./src/session.js')
+settleSession.activateById(toolRitualId)
+
+value = await toolOf('ritual_settle').execute({ title: '工具加的仪式', result: '守约' }, {})
+expect(value.ok === true && value.message.includes('记为守约') && value.message.includes('连击'), 'settle 守约')
+value = await toolOf('ritual_settle').execute({ title: '工具加的仪式', result: '失守' }, {})
+expect(value.ok === true && value.message.includes('守约天数保留'), 'settle 失守且说明天数保留')
+const afterBreach = JSON.parse(readFileSync(settleFile, 'utf8')).rituals.find(r => r.id === toolRitualId)
+expect(afterBreach.status === 'reserve' && afterBreach.keptDays === 1, '失守回预备区但守约天数保留')
+
+console.log('✓ Agent 工具：overview / search / add / settle 全部走通（含重名、空名、未立约、失守保留天数）')
+
 console.log('\nSMOKE OK — store:', join(tmp, 'ritual-copilot.json'))
 
 // ===== 面板（Roadmap #1）：路由 + client 半 =====
@@ -261,6 +325,11 @@ expect(payload.ok === true && payload.value.date, 'snapshot 返回今日')
 console.log(`\n$ POST /api/ritual.snapshot -> ok=${payload.ok} pending=${payload.value.totals.pending}`)
 
 // 立约 → 守约 → 失守，全程走 HTTP 面（面板就是这样调的）
+// 命令层用例已经用完今天的立约名额（每天限一条），这里先清掉 vowedOn 腾出来
+const httpFile = join(tmp, 'ritual-copilot.json')
+const httpState = JSON.parse(readFileSync(httpFile, 'utf8'))
+httpState.vowedOn = {}
+writeFileSync(httpFile, JSON.stringify(httpState, null, 2) + '\n')
 payload = await api('/api/ritual.add', { title: '面板冒烟仪式', kind: 'semi', note: '钩在刷牙后' })
 expect(payload.ok === true, 'add 路由')
 const panelId = payload.value.id

@@ -7,17 +7,16 @@ import { CATALOG, CATEGORIES, GUIDE, guideById, catalogByTitle } from './src/cat
 import { summaryStats, streakFor, heatmapDays } from './src/stats.js'
 import { load, save } from './src/store.js'
 import { registerRoutes } from './routes.js'
+import { registerTools } from './tools.js'
 import { readFileSync, writeFileSync, mkdirSync } from 'node:fs'
 import { join, dirname, resolve } from 'node:path'
 import { homedir } from 'node:os'
 
 export const name = '@local/dsh-ritual-copilot'
 
+// 命令是必需的；tools（Agent 工具）与 connection（面板路由）是可选增强——
+// 各自的服务不存在时那部分静默跳过，不影响主功能。
 export const inject = ['commands']
-
-// 面板路由需要 connection 服务；命令本身只需 commands。
-// 分开声明：没有被解析到的服务不会阻塞插件加载。
-export const optional = { inject: ['connection'] }
 
 function fmtRitual(r, state, today, { note = true } = {}) {
   const done = R.isHonoredOn(state, r.id, today) ? '✓' : '·'
@@ -496,4 +495,10 @@ export function apply(ctx) {
 
   // 面板数据路由：只在 connection 可用时挂载（纯命令环境下跳过）。
   if (ctx.connection?.fetch?.register) registerRoutes(ctx, S)
+
+  // Agent 工具：让模型自己读写仪式，而不是只会叫用户打命令。
+  // 工具在 ctx.tools 尚不可用时静默跳过；DSH 启动顺序里它通常已经在了。
+  if (!registerTools(ctx)) {
+    ctx.inject?.(['tools'], scoped => { registerTools(scoped) })
+  }
 }
