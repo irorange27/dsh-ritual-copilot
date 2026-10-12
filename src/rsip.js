@@ -179,9 +179,12 @@ export function vowRitual(state, { title, note = '', kind = 'passive', parentId 
 
 // 收录到预备区（从仪式库挑选）：不消耗每日立约名额
 export function reserveRitual(state, { title, note = '', kind = 'passive' }) {
-  if (state.rituals.some(r => r.title === title)) throw new Error(`「${title}」已在单中`)
+  const name = String(title ?? '').trim()
+  if (!name) throw new Error('仪式需要一个名字')
+  if (!KINDS[kind]) throw new Error(`未知的类型：${kind}`)
+  if (state.rituals.some(r => r.title === name)) throw new Error(`「${name}」已在单中`)
   const r = {
-    id: uid(), title, note, kind, parentId: null,
+    id: uid(), title: name, note, kind, parentId: null,
     status: STATUS_RESERVE, vowedDate: '', keptDays: 0, strengthen: 0,
   }
   state.rituals.push(r)

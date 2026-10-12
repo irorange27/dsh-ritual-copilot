@@ -1,4 +1,6 @@
-# @local/dsh-ritual-copilot bundle: one row mounting the /ritual command.
+# @local/dsh-ritual-copilot bundle
+# Host 半一行：/ritual 命令 + 面板数据路由（/api/ritual.*）
+# client 半由 package.json 的 dsh.client 声明，经 exports["./client"] 发现。
 - insert:
     - id: dsh-ritual-copilot
       name: '@local/dsh-ritual-copilot'

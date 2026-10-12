@@ -8,7 +8,13 @@ process.env.DSH_HOME = tmp
 
 const { apply } = await import('./index.js')
 const regs = []
-apply({ commands: { register: (d) => regs.push(d) } })
+const mountedRoutes = []
+apply({
+  commands: { register: (d) => regs.push(d) },
+  // 面板路由（/api/ritual.*）也一并挂载并验证
+  connection: { fetch: { register: (route) => route } },
+  effect: (fn) => { const made = fn(); if (typeof made !== 'function') mountedRoutes.push(made) },
+})
 const ritual = regs.find(r => r.name === 'ritual')
 const ctl = new AbortController()
 const run = (rawInput) => ritual.handler({ rawInput, commandId: 't', agent: {}, attachments: [], signal: ctl.signal })
@@ -178,3 +184,85 @@ r = await run('add 睡前拉伸10分钟')
 expect(r.kind === 'error', 'add 重名应失败')
 
 console.log('\nSMOKE OK — store:', join(tmp, 'ritual-copilot.json'))
+
+// ===== 面板（Roadmap #1）：路由 + client 半 =====
+
+// 1) 路由挂上了
+expect(mountedRoutes.length === 7, `应挂 7 条路由，实际 ${mountedRoutes.length}`)
+const routeOf = path => mountedRoutes.find(x => x.path === path)
+expect(routeOf('/api/ritual.snapshot') !== undefined, 'snapshot 路由')
+
+/** 走一遍真实的面板调用路径：Request → Response → JSON。 */
+const api = async (path, body) => {
+  const route = routeOf(path)
+  const request = new Request('http://local' + path, {
+    method: body === undefined ? 'GET' : 'POST',
+    ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+  })
+  return (await route.fetch(request)).json()
+}
+
+let payload = await api('/api/ritual.snapshot')
+expect(payload.ok === true && payload.value.date, 'snapshot 返回今日')
+console.log(`\n$ POST /api/ritual.snapshot -> ok=${payload.ok} pending=${payload.value.totals.pending}`)
+
+// 立约 → 守约 → 失守，全程走 HTTP 面（面板就是这样调的）
+payload = await api('/api/ritual.add', { title: '面板冒烟仪式', kind: 'semi', note: '钩在刷牙后' })
+expect(payload.ok === true, 'add 路由')
+const panelId = payload.value.id
+payload = await api('/api/ritual.activate', { id: panelId })
+expect(payload.ok === true && payload.value.title === '面板冒烟仪式', 'activate 路由')
+payload = await api('/api/ritual.honor', { ids: [panelId] })
+expect(payload.ok === true && payload.value.rows[0].keptDays === 1, 'honor 路由')
+payload = await api('/api/ritual.snapshot')
+const mine = payload.value.rituals.find(r => r.id === panelId)
+expect(mine !== undefined && mine.honored === true && mine.keptDays === 1, 'snapshot 反映落盘')
+payload = await api('/api/ritual.honor-all', {})
+expect(payload.ok === true, 'honor-all 路由')
+payload = await api('/api/ritual.breach', { id: panelId })
+expect(payload.ok === true && payload.value.keptDays === 1, 'breach 路由保留天数')
+payload = await api('/api/ritual.remove', { id: panelId })
+expect(payload.ok === true, 'remove 路由')
+
+// 业务错误必须是 200 + ok:false（面板要显示原因，不是当网络错）
+payload = await api('/api/ritual.breach', { id: '不存在' })
+expect(payload.ok === false && typeof payload.message === 'string', '业务错误形状')
+payload = await api('/api/ritual.add', {})
+expect(payload.ok === false, '空名字应被拒')
+
+console.log('✓ 面板路由：snapshot/add/activate/honor/honor-all/breach/remove 全部走通')
+
+// 2) client 半：在模拟的 __ModuleLoader__ 里加载，验证导出与注册
+const clientSource = readFileSync(new URL('./client.js', import.meta.url), 'utf8')
+let registration = null
+const styleEl = { setAttribute() {}, remove() {}, textContent: '' }
+const fakeDocument = { createElement: () => styleEl, head: { appendChild() {} } }
+const fakeWindow = { __ModuleLoader__: { load: r => { registration = r } } }
+// client 半只用 react 的 hooks + primitives 的图标
+const fakeReact = {
+  createElement: () => null,
+  Fragment: Symbol('Fragment'),
+  useState: () => [null, () => {}],
+  useEffect: () => {},
+  useCallback: f => f,
+  useMemo: f => f(),
+}
+const icons = new Proxy({}, { get: () => () => null })
+new Function('window', 'document', 'React', clientSource)(fakeWindow, fakeDocument, fakeReact)
+expect(registration !== null, 'client 半调用 __ModuleLoader__.load')
+expect(registration.id === '@local/dsh-ritual-copilot', 'client bundle id')
+const client = registration.factory(spec => {
+  if (spec === 'react') return fakeReact
+  if (spec === '@deepseek-ai/dsh-client-ui-primitives') return icons
+  throw new Error('client 半请求了未声明的包：' + spec)
+})
+expect(typeof client.apply === 'function', 'client 半导出 apply')
+expect(Array.isArray(client.inject) && client.inject.includes('slots'), 'client 半 inject slots')
+
+const slotCalls = []
+client.apply({
+  slots: { inject: (name, cb) => { slotCalls.push(name); cb(); return null }, register: () => () => {} },
+  effect: (fn) => fn(),
+})
+expect(slotCalls.includes('main') && slotCalls.includes('sidebar.panellist'), '注册 main + sidebar 图标')
+console.log('✓ client 半：bundle 可加载、导出正确、注册了 main + sidebar.panellist')

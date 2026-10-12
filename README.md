@@ -89,13 +89,36 @@ v1（国策树格式，`ego-rsip.json` 或浏览器 `localStorage` 导出的 JSO
 ## 结构
 
 ```
-index.js              Cordis 插件入口（/ritual 命令）
+index.js              Cordis 插件入口（/ritual 命令 + 面板路由挂载）
+routes.js             面板数据路由 /api/ritual.*（client 半的唯一通道）
+client.js             Client 半：侧边栏图标 + 面板（纯 JS bundle，无构建链）
 src/rsip.js           领域模型与规则引擎（立约/守约/失守/告假 + v1→v2 迁移）
+src/session.js        命令层与面板共用的状态操作（transact / snapshot / 动作）
 src/catalog.js        仪式库（29 条，7 个分类）
 src/stats.js          统计层（连续守约天数、日结率）
 src/store.js          文件存储（原子写 + 旧文件自动迁移）
-smoke.mjs             端到端冒烟（不启动 dsh）
+smoke.mjs             端到端冒烟（命令层 + 面板路由 + client 半，不启动 dsh）
 ```
+
+## 面板
+
+侧边栏出现「仪式」入口，面板三块：
+
+1. **今日日结** —— 每条一个「守约」按钮，点一下直接落盘；还有「全部守约」
+2. **连击** —— 最长连续守约天数 + 近 14 天热力格
+3. **预备区** —— 一键「立约」（受每天一条的额度限制）
+
+## 为什么面板不用 DSH 的 Remote
+
+DSH 的 Client→Host Remote 通道是**白名单**的：`api-remotes` 的 client 面里硬编码了
+25 个官方包，第三方静态插件无法把自己插进去；而 `host.call` 只对 cordis-client-runner
+现场求值的动态插件开放。
+
+所以面板走第三条路：`ctx.connection.fetch.register` 注册 `/api/ritual.*`，
+与 Remote 共用同一条**已认证**的 `/api` 通道（物理载体先过 trust + auth 围栏）。
+client 半直接 `fetch()` 即可。
+
+详见 [Issue #1](https://github.com/irorange27/dsh-ritual-copilot/issues/1) 的验证记录。
 
 ## 设计取向
 
@@ -110,7 +133,7 @@ smoke.mjs             端到端冒烟（不启动 dsh）
 
 | # | 主题 | 依赖 |
 |---|---|---|
-| [#1](https://github.com/irorange27/dsh-ritual-copilot/issues/1) | **极简面板**（纯 JS，无需构建链）— P0 地基 | — |
+| [#1](https://github.com/irorange27/dsh-ritual-copilot/issues/1) | ~~**极简面板**（纯 JS，无需构建链）— P0 地基~~ ✅ v0.2.0 | — |
 | [#2](https://github.com/irorange27/dsh-ritual-copilot/issues/2) | 主动提醒（一天最多一次） | #1 |
 | [#3](https://github.com/irorange27/dsh-ritual-copilot/issues/3) | 从「我的问题」出发推荐仪式 | — |
 | [#4](https://github.com/irorange27/dsh-ritual-copilot/issues/4) | 用真实数据检验规则本身 | #1 + 1 个月数据 |

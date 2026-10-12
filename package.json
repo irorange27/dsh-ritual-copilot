@@ -1,16 +1,24 @@
 {
   "name": "@local/dsh-ritual-copilot",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
-  "description": "Ritual Copilot: track whether you keep the rituals you set for yourself. A DeepSeek Harness plugin (/ritual).",
+  "description": "Ritual Copilot: track whether you keep the rituals you set for yourself. A DeepSeek Harness plugin (/ritual + sidebar panel).",
   "type": "module",
   "main": "index.js",
+  "exports": {
+    ".": "./index.js",
+    "./client": "./client.js",
+    "./routes": "./routes.js",
+    "./package.json": "./package.json"
+  },
   "repository": {
     "type": "git",
     "url": "git+https://github.com/irorange27/dsh-ritual-copilot.git"
   },
   "files": [
     "index.js",
+    "client.js",
+    "routes.js",
     "src/",
     "cordis.patch.yml",
     "README.md"
@@ -21,6 +29,10 @@
   "dsh": {
     "bundle": {
       "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "platform": "web",
+      "inject": []
     }
   },
   "engines": {

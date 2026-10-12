@@ -1,10 +1,12 @@
-// @local/dsh-ritual-copilot：仪式遵守统计 —— /ritual 命令
+// @local/dsh-ritual-copilot：仪式遵守统计 —— /ritual 命令 + 面板路由
 // 守约系措辞：仪式/预备区/仪式单/立约/守约/失守/日结/告假/守约天数
 
 import * as R from './src/rsip.js'
+import * as S from './src/session.js'
 import { CATALOG, CATEGORIES } from './src/catalog.js'
 import { summaryStats, streakFor, heatmapDays } from './src/stats.js'
 import { load, save } from './src/store.js'
+import { registerRoutes } from './routes.js'
 import { readFileSync, writeFileSync, mkdirSync } from 'node:fs'
 import { join, dirname, resolve } from 'node:path'
 import { homedir } from 'node:os'
@@ -12,6 +14,10 @@ import { homedir } from 'node:os'
 export const name = '@local/dsh-ritual-copilot'
 
 export const inject = ['commands']
+
+// 面板路由需要 connection 服务；命令本身只需 commands。
+// 分开声明：没有被解析到的服务不会阻塞插件加载。
+export const optional = { inject: ['connection'] }
 
 function fmtRitual(r, state, today, { note = true } = {}) {
   const done = R.isHonoredOn(state, r.id, today) ? '✓' : '·'
@@ -432,4 +438,7 @@ export function apply(ctx) {
       }
     },
   })
+
+  // 面板数据路由：只在 connection 可用时挂载（纯命令环境下跳过）。
+  if (ctx.connection?.fetch?.register) registerRoutes(ctx, S)
 }
