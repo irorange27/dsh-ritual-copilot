@@ -7,7 +7,7 @@
 // 它不含任何展示逻辑——文案、编号、emoji 都留在 index.js / client.js。
 
 import * as R from './rsip.js'
-import { streakFor, summaryStats, heatmapDays } from './stats.js'
+import { streakFor, summaryStats, heatmapDays, adjustments } from './stats.js'
 import { load, save } from './store.js'
 
 /**
@@ -109,6 +109,8 @@ export function snapshot(state, date = R.todayStr()) {
     },
     canVowToday: R.canVowToday(state, date),
     heat: heatmapDays(state, 14, date).map(d => ({ date: d.date, rate: d.rate, honored: d.honored, breached: d.breached })),
+    // 面板的「值得调整」块（#4）。最多三条——面板是操作面板，不是报告页。
+    advice: adjustments(state, { endDate: date }).slice(0, 3).map(a => ({ kind: a.kind, ritual: a.ritual ?? null, text: a.text })),
   }
 }
 

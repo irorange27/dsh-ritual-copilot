@@ -429,6 +429,11 @@ expect(payload.ok === false && typeof payload.message === 'string', '业务错�
 payload = await api('/api/ritual.add', {})
 expect(payload.ok === false, '空名字应被拒')
 
+// snapshot 带 advice（面板的「值得调整」块靠它）
+payload = await api('/api/ritual.snapshot')
+expect(Array.isArray(payload.value.advice), 'snapshot 带 advice 数组')
+expect(payload.value.advice.length <= 3, '面板最多显示三条建议')
+
 console.log('✓ 面板路由：snapshot/add/activate/honor/honor-all/breach/remove 全部走通')
 
 // 2) client 半：在模拟的 __ModuleLoader__ 里加载，验证导出与注册

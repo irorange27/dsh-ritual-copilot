@@ -106,6 +106,8 @@ window.__ModuleLoader__.load({
 .rc-streak-num { font-size: 20px; font-weight: 600; font-variant-numeric: tabular-nums; }
 .rc-empty { color: var(--dsw-alias-label-tertiary); padding: 10px 0; line-height: 1.7; }
 .rc-error { margin-top: 12px; padding: 8px 10px; border-radius: 8px; color: var(--dsw-alias-label-danger, #c33); background: var(--dsw-alias-bg-layer-2); }
+.rc-advice { display: flex; gap: 8px; padding: 9px 11px; border-radius: 8px; background: var(--dsw-alias-bg-layer-2); margin-top: 6px; line-height: 1.6; }
+.rc-advice-icon { flex: none; margin-top: 2px; color: var(--dsw-alias-label-tertiary); }
 .rc-loading { color: var(--dsw-alias-label-tertiary); padding: 20px 0; }
 .rc-heat { display: flex; gap: 3px; margin-top: 10px; }
 .rc-cell { width: 12px; height: 12px; border-radius: 3px; background: var(--dsw-alias-bg-layer-2); }
@@ -254,6 +256,16 @@ window.__ModuleLoader__.load({
               )),
             ),
         ),
+
+        // 值得调整（#4，最多三条）
+        (snap.advice ?? []).length
+          ? h(Section, { title: '值得调整' },
+            ...snap.advice.map((a, i) => h('div', { className: 'rc-advice', key: i },
+              h(IconSparkleRegular, { className: 'rc-advice-icon', size: 14 }),
+              h('span', null, a.text),
+            )),
+          )
+          : null,
 
         // 统计尾巴
         h('div', { className: 'rc-row-sub', style: { marginTop: 26 } },
