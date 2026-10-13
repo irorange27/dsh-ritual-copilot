@@ -243,10 +243,11 @@ process.env.DSH_HOME = previousHome
 
 // ===== Agent 工具（#3）：模型自己读写仪式 =====
 
-expect(mountedTools.length === 4, `应挂 4 个工具，实际 ${mountedTools.length}`)
+expect(mountedTools.length === 5, `应挂 5 个工具，实际 ${mountedTools.length}`)
 const toolOf = name => mountedTools.find(t => t.name === name)
 expect(toolOf('ritual_overview') !== undefined && toolOf('ritual_search') !== undefined
-  && toolOf('ritual_add') !== undefined && toolOf('ritual_settle') !== undefined, '四个工具都在')
+  && toolOf('ritual_add') !== undefined && toolOf('ritual_settle') !== undefined
+  && toolOf('ritual_reminder') !== undefined, '五个工具都在')
 
 for (const tool of mountedTools) {
   expect(typeof tool.execute === 'function', `${tool.name} 有 execute`)
@@ -376,6 +377,23 @@ console.log(`\n$ /ritual health\n${(await run('health')).text.slice(0, 160)}`)
 expect((await run('stats')).kind === 'success', 'stats 扩展后仍可用')
 expect((await run('health')).kind === 'success', 'health 子命令可用')
 console.log('✓ 数据检验：失守原因可记录、健康度按样本给比率、调整建议只在证据明显时给')
+
+// ===== 主动提醒（#2）：ritual_reminder 工具 =====
+const reminderTool = toolOf('ritual_reminder')
+value = await reminderTool.execute({ action: 'setup' }, {})
+expect(value.needsConfirmation === true, 'setup 必须先确认')
+expect(value.spec.daily.time === '21:30:00' && value.spec.daily.time_zone === 'Asia/Shanghai', '默认 21:30 Asia/Shanghai')
+expect(value.spec.prompt.includes('ritual_overview'), 'prompt 指示先查状态')
+expect(value.spec.prompt.includes('不要替用户判断'), 'prompt 把日结策略写死')
+expect(value.message.includes('schedule_create'), '给出创建路径')
+value = await reminderTool.execute({ action: 'setup', time: '22:00' }, {})
+expect(value.spec.daily.time === '22:00:00', '自定义时间生效')
+value = await reminderTool.execute({ action: 'status' }, {})
+expect(value.message.includes('schedule_list'), 'status 给查看路径')
+value = await reminderTool.execute({ action: 'teardown' }, {})
+expect(value.message.includes('schedule_delete'), 'teardown 给删除路径')
+expect(reminderTool.description.includes('绝不能未经确认'), '工具描述写死确认流程')
+console.log('✓ 主动提醒：ritual_reminder 工具（setup 需确认 / 默认 21:30 / 策略在 prompt 里）')
 
 console.log('\nSMOKE OK — store:', join(tmp, 'ritual-copilot.json'))
 

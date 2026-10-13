@@ -7,7 +7,7 @@ import { CATALOG, CATEGORIES, GUIDE, guideById, catalogByTitle } from './src/cat
 import { summaryStats, streakFor, heatmapDays, honorRate, ritualHealth, adjustments, breachReasons } from './src/stats.js'
 import { load, save } from './src/store.js'
 import { registerRoutes } from './routes.js'
-import { registerTools } from './tools.js'
+import { registerToolsWithReminder } from './tools.js'
 import { readFileSync, writeFileSync, mkdirSync } from 'node:fs'
 import { join, dirname, resolve } from 'node:path'
 import { homedir } from 'node:os'
@@ -114,6 +114,7 @@ const HELP = [
   '  /ritual guide [时段|编号]  不知道挑哪条就从这里开始（按"你在哪个时段出问题"）',
   '  /ritual library [分类]   仪式库（sleep/phone/order/work/energy/mood/mech）',
   '（也可以直接跟 Agent 说你想守住什么，让它帮你写成一条仪式）',
+  '（想要每天定时提醒日结？跟 Agent 说"帮我设仪式提醒"，确认后它会建）',
   '  /ritual seed             载入 9 个示例仪式到预备区',
   '  /ritual export [路径]    导出 JSON（默认 ~/.dsh/ritual-copilot-YYYY-MM-DD.json）',
   '  /ritual import <路径> [--merge]   导入 JSON（默认替换；--merge 按标题合并）',
@@ -549,7 +550,7 @@ export function apply(ctx) {
 
   // Agent 工具：让模型自己读写仪式，而不是只会叫用户打命令。
   // 工具在 ctx.tools 尚不可用时静默跳过；DSH 启动顺序里它通常已经在了。
-  if (!registerTools(ctx)) {
-    ctx.inject?.(['tools'], scoped => { registerTools(scoped) })
+  if (!registerToolsWithReminder(ctx)) {
+    ctx.inject?.(['tools'], scoped => { registerToolsWithReminder(scoped) })
   }
 }

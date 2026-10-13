@@ -224,3 +224,123 @@ export function registerTools(ctx) {
   }
   return true
 }
+
+// ---------- 主动提醒（#2）----------
+//
+// 通道：DSH 内置 schedule 服务（daily + IANA 时区）。到期时它把一条 user
+// message 注入绑定的 Session，prompt 全部归插件写——所以「只在有未日结
+// 仪式时提醒」这一策略不是靠定时器做条件判断，而是把判断交给收到消息
+// 的 Agent：prompt 让它先查 ritual_overview，没有未日结就完全不出声。
+//
+// 用户选择的三项决策（见 issue #2）：
+//   1. 触发时间 21:30（Asia/Shanghai，可用 remindAt 覆盖）
+//   2. 只在有未日结仪式时提醒（策略写进 prompt，由 Agent 执行）
+//   3. Agent 建议、用户确认后才创建（本插件绝不在安装时自动建任务）
+
+/** 提醒任务的固定标题——用它在 schedule 里认出自己，避免重复建。 */
+export const REMINDER_TITLE = '仪式日结提醒'
+
+/** 触发时 Agent 收到的 prompt（策略的唯一权威表述）。 */
+export function reminderPrompt() {
+  return [
+    '这是仪式日结提醒（每天 21:30）。',
+    '先用 ritual_overview 查一下今天的日结状态，然后按下面的规则行事：',
+    '- 如果还有未日结的仪式：用一两句话告诉用户哪几条还没结，'
+    + '问一句"今天这几条做到了吗"。不要长篇大论，不要重复仪式的说明。',
+    '- 如果今天全部日结完成，或者根本没有守约中的仪式：什么都不用说，'
+    + '直接简短确认即可（比如只回一个"今天都结了，没别的事"或等价短句）。'
+    + '宁可安静也不要制造每天必看的噪音。',
+    '- 用户回答后，用 ritual_settle 记录结果。守约/失守都由用户亲口说，'
+    + '不要替用户判断；失守时如果用户顺口说了原因，记到 reason 里。',
+  ].join('\n')
+}
+
+/**
+ * 建议的创建参数（Agent 拿去调 schedule_create）。
+ * @param {object} [options]
+ * @param {string} [options.time] HH:mm:ss，默认 21:30:00
+ * @param {string} [options.zone] IANA 时区，默认 Asia/Shanghai
+ */
+export function reminderSpec({ time = '21:30:00', zone = 'Asia/Shanghai' } = {}) {
+  return {
+    title: REMINDER_TITLE,
+    prompt: reminderPrompt(),
+    daily: { time, time_zone: zone },
+  }
+}
+
+/**
+ * 注册「仪式提醒」相关的 Agent 能力：一个 ritual_reminder 工具，
+ * 让 Agent 在用户同意后创建/查看/删除日结提醒。
+ *
+ * 刻意不做成自动创建：用户选了「Agent 建议、我确认后才建」，
+ * 所以工具描述里写明了这个流程。
+ */
+export function reminderToolDefinition() {
+  return {
+    name: 'ritual_reminder',
+    description: '管理仪式日结提醒（每天定时提醒用户做 /ritual 日结）。'
+      + '动作：setup（创建，需要用户先明确同意）、status（查看）、teardown（删除）。'
+      + 'setup 前必须先问用户"要不要我每天 21:30 提醒你日结"并得到肯定答复——'
+      + '绝不能未经确认就创建。创建用 schedule_create，参数从这个工具的返回里拿。',
+    parameters: {
+      action: { type: 'string', required: true, enum: ['setup', 'status', 'teardown'], description: '要执行的动作。' },
+      time: { type: 'string', description: '可选，HH:mm 格式（默认 21:30）。改时间只影响新建，已建的任务要用 schedule 的更新工具改。' },
+    },
+    output: {
+      schema: {
+        type: 'object', additionalProperties: false,
+        properties: {
+          action: { type: 'string', required: true },
+          needsConfirmation: { type: 'boolean' },
+          spec: { type: 'object', additionalProperties: true },
+          message: { type: 'string', required: true },
+        },
+      },
+      render: (_args, value) => [{ type: 'text', text: value.message }],
+    },
+    async execute(args) {
+      const action = String(args.action ?? '')
+      if (action === 'setup') {
+        const time = /^\d{2}:\d{2}$/.test(String(args.time ?? '')) ? `${args.time}:00` : '21:30:00'
+        const spec = reminderSpec({ time })
+        return {
+          action,
+          needsConfirmation: true,
+          spec,
+          message: [
+            '创建前必须先得到用户的明确同意。用户同意后，调 schedule_create，参数：',
+            `  title: "${spec.title}"`,
+            `  daily.time: "${spec.daily.time}"`,
+            `  daily.time_zone: "${spec.daily.time_zone}"`,
+            `  prompt: （见下，原文传入）`,
+            '---',
+            spec.prompt,
+          ].join('\n'),
+        }
+      }
+      if (action === 'status') {
+        return {
+          action,
+          message: '用 schedule_list 查看当前 Session 的任务；标题为「' + REMINDER_TITLE + '」的就是仪式日结提醒。'
+            + '（提醒绑定在创建它的 Session 上，换 Session 看不到，但任务仍在原 Session 里生效。）',
+        }
+      }
+      if (action === 'teardown') {
+        return {
+          action,
+          message: '先用 schedule_list 找到标题为「' + REMINDER_TITLE + '」的任务拿到 id，再用 schedule_delete 删除。删除前跟用户确认一句。',
+        }
+      }
+      return { action, message: `未知动作：${action}（支持 setup / status / teardown）` }
+    },
+  }
+}
+
+/** 连同提醒工具一起挂载。 */
+export function registerToolsWithReminder(ctx) {
+  const mounted = registerTools(ctx)
+  if (!mounted) return false
+  ctx.effect(() => ctx.tools.register(reminderToolDefinition()), 'ritual-copilot: tool ritual_reminder')
+  return true
+}
