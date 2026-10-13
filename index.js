@@ -14,9 +14,13 @@ import { homedir } from 'node:os'
 
 export const name = '@local/dsh-ritual-copilot'
 
-// 命令是必需的；tools（Agent 工具）与 connection（面板路由）是可选增强——
-// 各自的服务不存在时那部分静默跳过，不影响主功能。
-export const inject = ['commands']
+// 三个服务都写进 inject：cordis 会在它们齐备后才调用 apply。
+//
+// 曾经这里是 inject = ['commands'] + 在 apply 里 `ctx.inject(['tools'], cb)`
+// 兜底——那是错的：ctx.inject 是「注册子插件」的 API，不是「等服务出现后
+// 回调」。在已激活的 fiber 里调用它，apply 早已返回，回调实测不触发，
+// 结果就是工具静默不注册（面板槽注册正常，所以看起来「一半生效」）。
+export const inject = ['commands', 'tools', 'connection']
 
 function fmtRitual(r, state, today, { note = true } = {}) {
   const done = R.isHonoredOn(state, r.id, today) ? '✓' : '·'
@@ -545,12 +549,9 @@ export function apply(ctx) {
     },
   })
 
-  // 面板数据路由：只在 connection 可用时挂载（纯命令环境下跳过）。
+  // 面板数据路由：connection 已在 inject 里声明，到这里必然是齐备的。
   if (ctx.connection?.fetch?.register) registerRoutes(ctx, S)
 
   // Agent 工具：让模型自己读写仪式，而不是只会叫用户打命令。
-  // 工具在 ctx.tools 尚不可用时静默跳过；DSH 启动顺序里它通常已经在了。
-  if (!registerToolsWithReminder(ctx)) {
-    ctx.inject?.(['tools'], scoped => { registerToolsWithReminder(scoped) })
-  }
+  registerToolsWithReminder(ctx)
 }

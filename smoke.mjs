@@ -6,7 +6,9 @@ import { tmpdir } from 'node:os'
 const tmp = mkdtempSync(join(tmpdir(), 'ritual-copilot-'))
 process.env.DSH_HOME = tmp
 
-const { apply } = await import('./index.js')
+const indexModule = await import('./index.js')
+const { apply } = indexModule
+
 const regs = []
 const mountedRoutes = []
 const mountedTools = []
@@ -22,6 +24,15 @@ const ritual = regs.find(r => r.name === 'ritual')
 const ctl = new AbortController()
 const run = (rawInput) => ritual.handler({ rawInput, commandId: 't', agent: {}, attachments: [], signal: ctl.signal })
 const expect = (cond, msg) => { if (!cond) throw new Error('SMOKE FAIL: ' + msg) }
+
+// inject 必须覆盖命令、工具、路由三个服务。
+// 曾经的 bug：只声明 ['commands']，用 ctx.inject 兜底等 tools——
+// 那是「注册子插件」的 API，不是「等服务后回调」，回调实测不触发，
+// 结果是工具与路由静默不注册（面板槽却正常，看起来"一半生效"）。
+expect(
+  ['commands', 'tools', 'connection'].every(service => indexModule.inject.includes(service)),
+  `inject 应声明 commands/tools/connection，实际 ${JSON.stringify(indexModule.inject)}`,
+)
 
 let r = await run('')
 console.log(`\n$ /ritual\n[${r.kind}] ${r.text}`)
