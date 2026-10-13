@@ -16,10 +16,9 @@ export const name = '@local/dsh-ritual-copilot'
 
 // 三个服务都写进 inject：cordis 会在它们齐备后才调用 apply。
 //
-// 曾经这里是 inject = ['commands'] + 在 apply 里 `ctx.inject(['tools'], cb)`
-// 兜底——那是错的：ctx.inject 是「注册子插件」的 API，不是「等服务出现后
-// 回调」。在已激活的 fiber 里调用它，apply 早已返回，回调实测不触发，
-// 结果就是工具静默不注册（面板槽注册正常，所以看起来「一半生效」）。
+// 注意：`ctx.foo` 这种属性访问在 cordis 里会**抛错**（"cannot get property
+// ... without inject"），不是返回 undefined。所以下面一律用 ctx.get('foo')
+// 做存在性判断——它才是那个返回 undefined 的安全读法。
 export const inject = ['commands', 'tools', 'connection']
 
 function fmtRitual(r, state, today, { note = true } = {}) {
@@ -128,7 +127,7 @@ const HELP = [
 const KIND_ALIAS = { '自动': 'passive', '挂钩': 'semi', '手动': 'active', '保险': 'mechanism', '省心': 'passive', '省心型': 'passive', '顺手': 'semi', '借力型': 'semi', '用心': 'active', '费力型': 'active', '兜底': 'mechanism', '兜底型': 'mechanism', '被动': 'passive', '半被动': 'semi', '主动': 'active', '机制': 'mechanism', passive: 'passive', semi: 'semi', active: 'active', mechanism: 'mechanism' }
 
 export function apply(ctx) {
-  ctx.commands.register({
+  ctx.get('commands').register({
     name: 'ritual',
     description: '仪式遵守统计：今日日结/立约/预备区/统计/仪式库',
     input: { hint: '[done|1 2 3|guide|start|add|honor|breach|reserve|list|leave|edit|rm|stats|health|library|seed|export|import] …' },
@@ -549,8 +548,8 @@ export function apply(ctx) {
     },
   })
 
-  // 面板数据路由：connection 已在 inject 里声明，到这里必然是齐备的。
-  if (ctx.connection?.fetch?.register) registerRoutes(ctx, S)
+  // 面板数据路由。用 ctx.get() 而不是 ctx.connection —— 后者在服务缺失时抛错。
+  if (ctx.get('connection')?.fetch?.register) registerRoutes(ctx, S)
 
   // Agent 工具：让模型自己读写仪式，而不是只会叫用户打命令。
   registerToolsWithReminder(ctx)

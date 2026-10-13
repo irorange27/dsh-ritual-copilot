@@ -218,9 +218,12 @@ export function toolDefinitions() {
  * @returns {boolean} 是否挂上
  */
 export function registerTools(ctx) {
-  if (!ctx.tools?.register) return false
+  // ctx.get() 而不是 ctx.tools：cordis 里属性访问在服务缺失时抛错，
+  // ctx.get() 才返回 undefined。（?? 右侧也必须惰性——否则求值即抛。）
+  const registry = ctx.get?.('tools')
+  if (!registry?.register) return false
   for (const definition of toolDefinitions()) {
-    ctx.effect(() => ctx.tools.register(definition), `ritual-copilot: tool ${definition.name}`)
+    ctx.effect(() => registry.register(definition), `ritual-copilot: tool ${definition.name}`)
   }
   return true
 }
@@ -341,6 +344,7 @@ export function reminderToolDefinition() {
 export function registerToolsWithReminder(ctx) {
   const mounted = registerTools(ctx)
   if (!mounted) return false
-  ctx.effect(() => ctx.tools.register(reminderToolDefinition()), 'ritual-copilot: tool ritual_reminder')
+  const registry = ctx.get?.('tools')
+  ctx.effect(() => registry.register(reminderToolDefinition()), 'ritual-copilot: tool ritual_reminder')
   return true
 }

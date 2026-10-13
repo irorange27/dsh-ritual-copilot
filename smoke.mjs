@@ -9,17 +9,24 @@ process.env.DSH_HOME = tmp
 const indexModule = await import('./index.js')
 const { apply } = indexModule
 
+/** 冒烟用的 ctx：cordis 的 ctx.get(name) 是安全的服务读取口。 */
+const stubCtx = services => ({
+  get: name => services[name],
+  effect: fn => fn(),
+  ...services,
+})
+
 const regs = []
 const mountedRoutes = []
 const mountedTools = []
-apply({
+apply(stubCtx({
   commands: { register: (d) => regs.push(d) },
   // Agent 工具（ctx.tools）也一并挂载并验证
   tools: { register: (d) => { mountedTools.push(d); return () => {} } },
   // 面板路由（/api/ritual.*）也一并挂载并验证
   connection: { fetch: { register: (route) => route } },
   effect: (fn) => { const made = fn(); if (typeof made !== 'function') mountedRoutes.push(made) },
-})
+}))
 const ritual = regs.find(r => r.name === 'ritual')
 const ctl = new AbortController()
 const run = (rawInput) => ritual.handler({ rawInput, commandId: 't', agent: {}, attachments: [], signal: ctl.signal })
@@ -405,6 +412,29 @@ value = await reminderTool.execute({ action: 'teardown' }, {})
 expect(value.message.includes('schedule_delete'), 'teardown 给删除路径')
 expect(reminderTool.description.includes('绝不能未经确认'), '工具描述写死确认流程')
 console.log('✓ 主动提醒：ritual_reminder 工具（setup 需确认 / 默认 21:30 / 策略在 prompt 里）')
+
+// ===== 服务访问必须是安全的（cordis 会抛错，不返回 undefined）=====
+// 用一个「像 cordis 一样抛错」的代理跑 apply：任何未声明服务的属性访问都会抛。
+// 这曾经是个真实 bug：ctx.connection 访问触发了
+//   Error: cannot get property "connection" without inject
+// 导致整个插件启用失败。
+const throwingCtx = services => new Proxy({}, {
+  get(_target, prop) {
+    if (prop === 'get') return key => services[key]
+    if (prop === 'effect') return fn => fn()
+    if (services[prop] !== undefined) return services[prop]
+    throw new Error(`cannot get property "${String(prop)}" without inject`)
+  },
+})
+
+const full = { commands: { register: () => {} }, tools: { register: () => () => {} }, connection: { fetch: { register: () => () => {} } } }
+apply(throwingCtx(full))
+console.log('✓ 服务齐备时 apply 不抛错')
+
+// 缺 tools / connection 时必须也只是跳过，不能炸
+apply(throwingCtx({ commands: { register: () => {} } }))
+apply(throwingCtx({ commands: { register: () => {} }, tools: { register: () => () => {} } }))
+console.log('✓ 缺 tools/connection 时 apply 仍不抛错（优雅降级）')
 
 console.log('\nSMOKE OK — store:', join(tmp, 'ritual-copilot.json'))
 

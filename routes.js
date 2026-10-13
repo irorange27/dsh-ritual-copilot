@@ -66,8 +66,11 @@ function guard(run) {
  * @param {typeof import('./src/session.js')} S session 层
  */
 export function registerRoutes(ctx, S) {
+  // ctx.get() 而不是 ctx.connection：cordis 里属性访问在服务缺失时抛错，
+  // ctx.get() 才返回 undefined。整个注册过程只解一次引用。
+  const fetch = ctx.get?.('connection').fetch
   const register = route => ctx.effect(
-    () => ctx.connection.fetch.register({ requestBody: 'buffered', methods: ['GET', 'POST'], ...route }),
+    () => fetch.register({ requestBody: 'buffered', methods: ['GET', 'POST'], ...route }),
     `ritual-copilot: ${route.path}`,
   )
 
