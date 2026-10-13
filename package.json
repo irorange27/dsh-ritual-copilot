@@ -1,6 +1,6 @@
 {
   "name": "@local/dsh-ritual-copilot",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "private": true,
   "description": "Ritual Copilot: track whether you keep the rituals you set for yourself. A DeepSeek Harness plugin (/ritual + sidebar panel).",
   "type": "module",

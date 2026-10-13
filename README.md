@@ -49,11 +49,15 @@ dsh plugin --profile <name> add /path/to/dsh-ritual-copilot
 
 ## 上手
 
+**最省事的路径**：直接跟 Agent 说「我最近最想改掉的习惯是……」，它会帮你写成一条仪式。
+
+想自己动手：
+
 ```sh
-/ritual seed       # 载入 9 个示例仪式到预备区
-/ritual reserve    # 看编号
-/ritual start 1    # 立约
-/ritual done       # 今天都做到了
+/ritual guide     # 不知道挑哪条：按"你在哪个时段出问题"给推荐
+/ritual library   # 想自己翻：仪式库 29 条
+/ritual start 1   # 挑好后立约
+/ritual done      # 今天都做到了
 ```
 
 ## 命令
@@ -64,20 +68,36 @@ dsh plugin --profile <name> add /path/to/dsh-ritual-copilot
 | `/ritual done` | 一键全部守约 |
 | `/ritual 1 2 3` | 按今日列表编号批量守约 |
 | `/ritual honor <名字\|编号>` | 单条守约 |
-| `/ritual breach <名字\|编号>` | 失守（连带子仪式回预备区） |
+| `/ritual breach <名字\|编号> [原因=…]` | 失守（连带子仪式回预备区，守约天数保留；原因可选，用于归因） |
 | `/ritual start <名字\|编号> [自动\|挂钩\|手动\|保险]` | 立约（每天限一条） |
 | `/ritual add <名字> [类型=…] [说明=…]` | 收录到预备区（不占今日名额） |
+| `/ritual guide [时段\|编号]` | 从「你在哪个时段出问题」给推荐（每条带原理说明） |
 | `/ritual reserve` | 查看预备区（带编号） |
 | `/ritual list` | 查看仪式单（树形） |
 | `/ritual leave <日期> <名字…>` | 告假 |
 | `/ritual edit <名字\|编号> [新名字=…] [类型=…] [说明=…] [挂靠=…\|顶层]` | 修改仪式 |
 | `/ritual rm <名字\|编号>` | 删除仪式 |
-| `/ritual stats` | 统计 |
+| `/ritual stats` | 统计（守约率、逐条健康度、失守原因、值得调整） |
+| `/ritual health` | 逐条详细复盘 |
 | `/ritual library [分类]` | 仪式库 |
 | `/ritual seed` | 载入示例 |
 | `/ritual export [路径]` / `/ritual import <路径> [--merge]` | 导出 / 导入 JSON |
 
 旧命令（`keep` / `light` / `relight` / `fail` / `hand` / `tree` / `freeze` / `catalog`）保留为别名。
+
+## Agent 工具
+
+跟 Agent 对话就能完成全部日常操作，不用打命令：
+
+| 工具 | 作用 |
+|---|---|
+| `ritual_overview` | 今日待日结 / 预备区 / 统计 / 时段入口 |
+| `ritual_search` | 在仪式库里搜（含原理说明） |
+| `ritual_add` | 收录进预备区 |
+| `ritual_settle` | 日结守约/失守（可带原因；不替用户判断） |
+| `ritual_reminder` | 管理每天 21:30 的日结提醒（**经你确认后**才创建） |
+
+想设提醒就说「帮我设仪式提醒」；想删就说「把仪式提醒删了」。
 
 ## 数据
 
@@ -89,24 +109,26 @@ v1（国策树格式，`ego-rsip.json` 或浏览器 `localStorage` 导出的 JSO
 ## 结构
 
 ```
-index.js              Cordis 插件入口（/ritual 命令 + 面板路由挂载）
+index.js              Cordis 插件入口（/ritual 命令 + 面板路由 + Agent 工具挂载）
 routes.js             面板数据路由 /api/ritual.*（client 半的唯一通道）
 client.js             Client 半：侧边栏图标 + 面板（纯 JS bundle，无构建链）
+tools.js              Agent 工具（overview / search / add / settle / reminder）
 src/rsip.js           领域模型与规则引擎（立约/守约/失守/告假 + v1→v2 迁移）
-src/session.js        命令层与面板共用的状态操作（transact / snapshot / 动作）
-src/catalog.js        仪式库（29 条，7 个分类）
-src/stats.js          统计层（连续守约天数、日结率）
+src/session.js        命令层、面板与工具共用的状态操作（transact / snapshot / 动作）
+src/catalog.js        仪式库（29 条，7 分类）+ 时段入口 GUIDE（8 个时段）
+src/stats.js          统计层（连击、守约率、逐条健康度、调整建议）
 src/store.js          文件存储（原子写 + 旧文件自动迁移）
-smoke.mjs             端到端冒烟（命令层 + 面板路由 + client 半，不启动 dsh）
+smoke.mjs             端到端冒烟（命令 + 工具 + 路由 + client 半 + 迁移，不启动 dsh）
 ```
 
 ## 面板
 
-侧边栏出现「仪式」入口，面板三块：
+侧边栏出现「仪式」入口，面板四块：
 
 1. **今日日结** —— 每条一个「守约」按钮，点一下直接落盘；还有「全部守约」
 2. **连击** —— 最长连续守约天数 + 近 14 天热力格
 3. **预备区** —— 一键「立约」（受每天一条的额度限制）
+4. **值得调整** —— 最多三条来自数据的建议（手动型守不住→改挂钩；同一原因反复→规则与环境冲突）
 
 ## 为什么面板不用 DSH 的 Remote
 
@@ -131,13 +153,13 @@ client 半直接 `fetch()` 即可。
 
 **[→ Roadmap 总览（Issue #6）](https://github.com/irorange27/dsh-ritual-copilot/issues/6)** — 顺序、依赖关系、设计原则、明确不做的事。
 
-| # | 主题 | 依赖 |
+| # | 主题 | 状态 |
 |---|---|---|
-| [#1](https://github.com/irorange27/dsh-ritual-copilot/issues/1) | ~~**极简面板**（纯 JS，无需构建链）— P0 地基~~ ✅ v0.2.0 | — |
-| [#2](https://github.com/irorange27/dsh-ritual-copilot/issues/2) | 主动提醒（一天最多一次） | #1 |
-| [#3](https://github.com/irorange27/dsh-ritual-copilot/issues/3) | 从「我的问题」出发推荐仪式 | — |
-| [#4](https://github.com/irorange27/dsh-ritual-copilot/issues/4) | 用真实数据检验规则本身 | #1 + 1 个月数据 |
-| [#5](https://github.com/irorange27/dsh-ritual-copilot/issues/5) | 冷启动体验（3 分钟拥有第一条仪式） | #5-B 依赖 #3 |
+| [#1](https://github.com/irorange27/dsh-ritual-copilot/issues/1) | **极简面板**（纯 JS，无需构建链） | ✅ 代码完成，待真实 DSH 验证 |
+| [#2](https://github.com/irorange27/dsh-ritual-copilot/issues/2) | 主动提醒（21:30，只在有未日结时出声） | ✅ 代码完成（经确认的决策） |
+| [#3](https://github.com/irorange27/dsh-ritual-copilot/issues/3) | 从「我的问题」出发推荐仪式 | ✅ Agent 工具 + guide |
+| [#4](https://github.com/irorange27/dsh-ritual-copilot/issues/4) | 用真实数据检验规则本身 | ✅ 机制完成；结论需 1 个月真实数据 |
+| [#5](https://github.com/irorange27/dsh-ritual-copilot/issues/5) | 冷启动体验 | ✅ 空状态改造 + guide |
 
 ### 为什么命令层不是终点
 
